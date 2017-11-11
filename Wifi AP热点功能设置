@@ -1,0 +1,161 @@
+0.前言
+    本文详细说明为树莓派增加Wifi AP热点功能的具体步骤。配置完成之后，树莓派将增加一个Wifi热点功能，使用笔记本或手机便可连接树莓派，树莓派具有了AP热点功能，可更一步扩展树莓派相关的WEB功能，通过连接树莓派提供的热点，登录树莓派提供的WEB服务，便可获得树莓派所监控的相关信息。
+    配置的步骤较多，请保持耐心。
+    【配置说明】
+    1.树莓派热点名称（SSID）为Raspberry_AP，热点密码为12345678，加密方式为WPA2。
+    2.树莓派无线网口的IP地址为192.168.0.1。
+    3.树莓派无线网口具有简单的DHCP功能。
+    4.树莓派具有无线网口和有线网口间的转发功能。
+    【相关博文】
+    更多内容请查看——【树莓派学习笔记——索引博文】
+    【树莓派学习笔记——USB wifi配置指南】——描述STA模式配置步骤，而本文为AP模式。
+    【树莓派学习笔记——修改树莓派软件源】
+
+1.选择合适的USB Wifi网卡
+    请先购买合适的USB Wifi无线网卡。淘宝上最容易的买到的适合树莓派的USB无线网卡为EDUP的EP-N8508GS，该款USB无线网卡的芯片为REALTEK 8188。在raspbian系统提供的默认驱动中，REALTEK 8188并不能直接工作于Wifi AP模式。为了能在树莓派raspbian系统中使用wifi AP模式，可购买网卡芯片为RT5730或RT5732的USB wifi网卡，例如SL-1506N。
+    把USB Wifi插入树莓派的USB端口，远程登录树莓派。
+    【使用lsusb命令】
+    若USB wifi插入正确，可查看到RT5370相关信息。
+
+图1.1 查看RT5370相关信息
+    【安装iw工具】
+    sudo apt-get install iw
+    【使用iw命令查看无线功能列表】    
+    iw list
+     如果使用RT5370网卡可获得较多的信息，下图在iw list命令部分输出内容。
+
+图1.2 iw list相关信息
+    如果使用RTL8188网卡，那么iw list命令只输出“nl80211 not found”，说明该系统中RTL8188并不支持AP模式。
+
+2.必要的准备工作
+【1】更新软件源
+sudo apt-get update
+【2】安装必要的软件
+sudo apt-get install hostapd udhcpd
+    hostapd 是一个用户态用于AP和认证服务器的守护进程，它实现了IEEE 802.11相关的接入管理（来自百度百科）。udhcpd使得树莓派具备DHCP Server功能。
+
+3.配置DHCP功能
+ 配置文件位于/etc/udhcpd.conf，此处共分为三步。
+    sudo nano  /etc/udhcpd.conf
+【1】修改网络接口
+interface eth0
+改为
+interface wlan0
+
+图3.1 修改udhcpd.conf
+【2】去除remaining前的#
+#remaining     yes
+改为
+remain    yes
+
+图3.2 修改udhcpd.conf
+【3】修改树莓派IP地址
+修改opt router为192.168.0.1，那么配置完成之后树莓派AP模式的IP地址为192.168.0.1
+此处opt dns被修改为江苏电信的常用DNS地址 211.228.255.1和218.2.135.1。
+
+图3.3 修改udhcpd.conf
+
+4.使能DHCP
+配置 /etc/default/udhcpd
+sudo nano  /etc/default/udhcpd
+使用#符号注释DHCPD_ENABLED="no"
+DHCPD_ENABLED="no"
+改为
+#DHCPD_ENABLED="no"
+
+图4.1 修改udhcpd
+
+5.把wlan0配置为静态IP地址
+    直接通过控制台输入以下指令，wlan0的IP地址对应/etc/udhcpd.conf中的相关配置参数。
+sudo ifconfig wlan0 192.168.0.1
+
+6.配置网卡启动参数
+配置文件 /etc/network/interfaces，请注意此处wlan0的地址参数要和etc/udhcpd.conf相关参数相对应。
+sudo nano  /etc/network/interfaces
+注释
+#allow-hotplug wlan0
+#iface wlan0 inet manual
+#wpa-roam /etc/wpa_supplicant/wpa_supplicant.conf
+#iface default inet dhcp
+增加
+iface wlan0 inet static
+        address 192.168.0.1
+        netmask 255.255.255.0
+
+图6.1 修改interfaces
+
+7.配置AP参数
+    【设置参数】
+创建文件 /etc/hostapd/hostapd.conf，配置树莓派AP热点名称和热点密码。
+sudo nano  /etc/hostapd/hostapd.conf
+在该文件中增加以下内容
+interface=wlan0
+driver=nl80211
+ssid=Raspberry_AP
+hw_mode=g
+channel=6
+macaddr_acl=0
+auth_algs=1
+ignore_broadcast_ssid=0
+wpa=2
+wpa_passphrase=12345678
+wpa_key_mgmt=WPA-PSK
+wpa_pairwise=TKIP
+rsn_pairwise=CCMP
+
+其中
+interface=wlan0，指定网卡名称为wlan0。
+wpa=2，采用WPA2加密方式。
+ssid=Raspberry_AP为热点名称，可根据实际情况修改。
+wpa_passphrase=12345678为热点密码，可根据实际情况修改，如果采用WPA2加密方式，密码的长度应该不少于8个字符。
+    【指定配置文件位置】
+修改配置文件/etc/default/hostapd
+sudo nano  /etc/default/hostapd
+改
+#DAEMON_CONF=""
+为
+DAEMON_CONF="/etc/hostapd/hostapd.conf"
+
+图7.1 修改hostapd
+
+8.配置NAT(IP转发)
+【1】Linux内核中启动IP转发
+sudo sh -c "echo 1 > /proc/sys/net/ipv4/ip_forward"
+ 修改/etc/sysctl.conf文件
+sudo nano /etc/sysctl.conf
+在该文件最后一行增加
+net.ipv4.ip_forward=1
+
+图8.1 修改sysctl.conf
+【2】定义IP转发规则
+依次输入以下指令
+sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+sudo iptables -A FORWARD -i eth0 -o wlan0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+sudo iptables -A FORWARD -i wlan0 -o eth0 -j ACCEPT
+【3】保存修改
+sudo sh -c "iptables-save > /etc/iptables.ipv4.nat"
+【4】再次修改 /etc/network/interfaces文件
+ /etc/network/interfaces的最后一行增加内容
+sudo nano /etc/network/interfaces
+增加
+up iptables-restore < /etc/iptables.ipv4.nat
+
+图8.2 再次修改interfaces
+
+9.启动服务
+【1】启动hostapd和udhcpd服务
+    sudo service hostapd start
+    sudo service udhcpd start
+【2】设置开机启动
+    sudo update-rc.d hostapd enable
+    sudo update-rc.d udhcpd enable
+
+10.基本验证
+    如果所有的配置成功，那么便可查找到SSID为Raspberry_AP的热点，热点密码为12345678，热点的IP地址为192.168.0.1，笔记本被分配的IP地址为192.168.0.63。
+
+图10.1 基本验证
+
+参考资料
+【1】RPI-Wireless-Hotspot
+【2】将树莓派Raspberry Pi设置为无线路由器(WiFi热点AP,RTL8188CUS芯片)
+【3】 hostapd实现WIFI 热点（AP）
